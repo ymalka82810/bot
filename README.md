@@ -5,13 +5,16 @@
 
 ## התקנה חד-פעמית
 
-### 1. פריסה ל-Convex
-```
-npm install
-npx convex deploy
-```
-בפעם הראשונה תתבקש להתחבר ל-Convex וליצור פרויקט.
-כתובת האתר: `https://<שם-הפריסה>.convex.site` (מופיעה ב-dashboard.convex.dev תחת Settings → URL & Deploy Key, בשורה HTTP Actions URL).
+### 1. פריסה ל-Convex (אוטומטית מגיט)
+כל push ל-`main` נפרס אוטומטית ל-Convex דרך GitHub Actions.
+הגדרה חד-פעמית, אפשר גם מהטלפון:
+1. dashboard.convex.dev ← Create project.
+2. בפרויקט: Settings ← URL & Deploy Key ← בפריסת **Production** ← Generate Production Deploy Key ← להעתיק.
+3. בריפו ב-GitHub: Settings ← Secrets and variables ← Actions ← New repository secret.
+   שם: `CONVEX_DEPLOY_KEY`, ערך: המפתח שהעתקת.
+4. Actions ← Deploy to Convex ← Run workflow (או כל push ל-main).
+
+כתובת האתר: `https://<שם-הפריסה>.convex.site` (ב-Settings ← URL & Deploy Key, בשורה HTTP Actions URL).
 
 ### 2. מפתח OAuth של Google
 1. console.cloud.google.com ← פרויקט חדש.
