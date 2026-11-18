@@ -5,34 +5,39 @@ export const PAGE = `<!DOCTYPE html>
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>חיפוש בדרייב</title>
+  <title>חיפוש בתיקייה</title>
   <style>
-    body { font-family: system-ui, sans-serif; margin: 0; background: #f5f5f5; }
+    body { font-family: system-ui, sans-serif; margin: 0; background: #f5f5f5; color: #111; }
     #app { max-width: 640px; margin: 0 auto; padding: 16px; }
-    h1 { font-size: 20px; }
-    #log { display: flex; flex-direction: column; gap: 10px; margin-bottom: 80px; }
-    .msg { padding: 10px 14px; border-radius: 12px; line-height: 1.5; white-space: pre-wrap; }
-    .me { background: #dbeafe; align-self: flex-start; }
-    .bot { background: #fff; align-self: flex-end; }
-    .files a, .msg a { display: block; font-size: 13px; margin-top: 4px; }
-    #ask { position: fixed; bottom: 0; right: 0; left: 0; display: flex; gap: 8px;
-           padding: 10px; background: #fff; border-top: 1px solid #ddd; }
-    input { flex: 1; padding: 10px; font-size: 16px; border: 1px solid #ccc; border-radius: 8px; }
-    button { padding: 10px 16px; font-size: 16px; border: 0; border-radius: 8px; background: #2563eb; color: #fff; }
+    h1 { font-size: 20px; margin: 0 0 12px; }
+    form { display: flex; gap: 8px; margin-bottom: 12px; }
+    input { flex: 1; min-width: 0; padding: 12px; font-size: 16px; border: 1px solid #ccc; border-radius: 10px; }
+    button, .dl { padding: 12px 16px; font-size: 16px; border: 0; border-radius: 10px;
+                  background: #2563eb; color: #fff; text-decoration: none; white-space: nowrap; }
     button:disabled { opacity: .5; }
+    #status { color: #555; font-size: 14px; margin: 8px 0; }
+    #status a { display: inline-block; margin-top: 6px; }
+    .file { display: flex; align-items: center; gap: 10px; background: #fff; border-radius: 10px;
+            padding: 10px 12px; margin-bottom: 8px; }
+    .info { flex: 1; min-width: 0; }
+    .name { color: #111; text-decoration: none; font-weight: 600; display: block;
+            overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .date { color: #777; font-size: 12px; }
+    .dl { padding: 8px 12px; font-size: 14px; }
     .hidden { display: none !important; }
   </style>
 </head>
 <body>
 <div id="app">
-  <h1>חיפוש בדרייב</h1>
+  <h1>חיפוש בתיקייה</h1>
   <button id="login" class="hidden">התחבר עם Google</button>
-  <div id="log"></div>
+  <form id="find" class="hidden">
+    <input id="q" placeholder="שם קובץ או מילה מתוכו" autocomplete="off" required>
+    <button id="b">חפש</button>
+  </form>
+  <div id="status"></div>
+  <div id="results"></div>
 </div>
-<form id="ask" class="hidden">
-  <input id="q" placeholder="מה לחפש בדרייב?" autocomplete="off" required>
-  <button id="b">שלח</button>
-</form>
 <script type="module">
   import { initializeApp } from "https://www.gstatic.com/firebasejs/11.0.2/firebase-app.js";
   import { getAuth, GoogleAuthProvider, signInWithPopup } from "https://www.gstatic.com/firebasejs/11.0.2/firebase-auth.js";
@@ -50,7 +55,7 @@ export const PAGE = `<!DOCTYPE html>
 
   function show() {
     $("login").classList.toggle("hidden", !!token);
-    $("ask").classList.toggle("hidden", !token);
+    $("find").classList.toggle("hidden", !token);
   }
   show();
 
@@ -59,63 +64,69 @@ export const PAGE = `<!DOCTYPE html>
       const result = await signInWithPopup(auth, provider);
       token = GoogleAuthProvider.credentialFromResult(result).accessToken;
       try { sessionStorage.setItem("drive-token", JSON.stringify({ token, exp: Date.now() + 50 * 60 * 1000 })); } catch (e) {}
+      $("status").textContent = "";
       show();
+      $("q").focus();
     } catch (err) {
-      add("ההתחברות נכשלה: " + err.message, "bot");
+      $("status").textContent = "ההתחברות נכשלה: " + err.message;
     }
   });
 
-  function add(text, cls) {
-    const d = document.createElement("div");
-    d.className = "msg " + cls;
-    d.textContent = text;
-    $("log").appendChild(d);
-    window.scrollTo(0, document.body.scrollHeight);
-    return d;
+  function fileRow(f) {
+    const row = document.createElement("div");
+    row.className = "file";
+    const info = document.createElement("div");
+    info.className = "info";
+    const name = document.createElement("a");
+    name.className = "name"; name.href = f.url; name.target = "_blank"; name.textContent = f.name;
+    const date = document.createElement("div");
+    date.className = "date";
+    date.textContent = new Date(f.modified).toLocaleDateString("he-IL");
+    info.append(name, date);
+    row.appendChild(info);
+    if (f.download) {
+      const dl = document.createElement("a");
+      dl.className = "dl"; dl.href = f.download; dl.target = "_blank"; dl.textContent = "הורדה";
+      row.appendChild(dl);
+    }
+    return row;
   }
 
-  function link(parent, href, text) {
-    const a = document.createElement("a");
-    a.href = href; a.target = "_blank"; a.textContent = text;
-    parent.appendChild(a);
-  }
-
-  $("ask").addEventListener("submit", async (e) => {
+  $("find").addEventListener("submit", async (e) => {
     e.preventDefault();
-    const text = $("q").value.trim();
-    if (!text) return;
-    add(text, "me");
-    $("q").value = "";
+    const query = $("q").value.trim();
+    if (!query) return;
     $("b").disabled = true;
-    const wait = add("מחפש...", "bot");
+    $("results").innerHTML = "";
+    $("status").textContent = "מחפש...";
     try {
-      const res = await fetch("/ask", {
+      const res = await fetch("/search", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ accessToken: token, question: text }),
+        body: JSON.stringify({ accessToken: token, query }),
       });
       const r = await res.json();
       if (r.error) {
-        wait.textContent = r.error;
+        $("status").textContent = r.error;
         if (r.enableUrl) {
-          link(wait, r.enableUrl, "לחץ כאן ← Enable, ואז שאל שוב");
+          const a = document.createElement("a");
+          a.href = r.enableUrl; a.target = "_blank";
+          a.textContent = "לחץ כאן ← Enable, ואז חפש שוב";
+          $("status").append(document.createElement("br"), a);
         }
         if (r.needsLogin) {
           token = null;
           try { sessionStorage.removeItem("drive-token"); } catch (e) {}
           show();
         }
+      } else if (!r.files.length) {
+        $("status").textContent = "לא נמצאו קבצים (" + r.seconds + " שניות)";
       } else {
-        wait.textContent = r.answer;
-        if (r.files.length) {
-          const box = document.createElement("div");
-          box.className = "files";
-          r.files.forEach((x) => link(box, x.url, x.name));
-          wait.appendChild(box);
-        }
+        $("status").textContent = "נמצאו " + r.files.length + " קבצים (" + r.seconds + " שניות)";
+        r.files.forEach((f) => $("results").appendChild(fileRow(f)));
       }
     } catch (err) {
-      wait.textContent = "שגיאה: " + err.message;
+      $("status").textContent = "שגיאה: " + err.message;
     }
     $("b").disabled = false;
   });
