@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+  <base target="_top">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    body { font-family: system-ui, sans-serif; margin: 0; background: #f5f5f5; }
+    #app { max-width: 640px; margin: 0 auto; padding: 16px; }
+    h1 { font-size: 20px; }
+    #log { display: flex; flex-direction: column; gap: 10px; margin-bottom: 70px; }
+    .msg { padding: 10px 14px; border-radius: 12px; line-height: 1.5; white-space: pre-wrap; }
+    .me { background: #dbeafe; align-self: flex-start; }
+    .bot { background: #fff; align-self: flex-end; }
+    .files a { display: block; font-size: 13px; margin-top: 4px; }
+    form { position: fixed; bottom: 0; right: 0; left: 0; display: flex; gap: 8px;
+           padding: 10px; background: #fff; border-top: 1px solid #ddd; }
+    input { flex: 1; padding: 10px; font-size: 16px; border: 1px solid #ccc; border-radius: 8px; }
+    button { padding: 10px 16px; font-size: 16px; border: 0; border-radius: 8px;
+             background: #2563eb; color: #fff; }
+    button:disabled { opacity: .5; }
+  </style>
+</head>
+<body>
+<div id="app">
+  <h1>חיפוש בדרייב</h1>
+  <div id="log"></div>
+</div>
+<form id="f">
+  <input id="q" placeholder="מה לחפש בדרייב?" autocomplete="off" required>
+  <button id="b">שלח</button>
+</form>
+<script>
+  const log = document.getElementById('log');
+  const f = document.getElementById('f');
+  const q = document.getElementById('q');
+  const b = document.getElementById('b');
+
+  function add(text, cls) {
+    const d = document.createElement('div');
+    d.className = 'msg ' + cls;
+    d.textContent = text;
+    log.appendChild(d);
+    window.scrollTo(0, document.body.scrollHeight);
+    return d;
+  }
+
+  f.addEventListener('submit', function (e) {
+    e.preventDefault();
+    const text = q.value.trim();
+    if (!text) return;
+    add(text, 'me');
+    q.value = '';
+    b.disabled = true;
+    const wait = add('מחפש...', 'bot');
+    google.script.run
+      .withSuccessHandler(function (r) {
+        wait.textContent = r.answer;
+        if (r.files.length) {
+          const box = document.createElement('div');
+          box.className = 'files';
+          r.files.forEach(function (x) {
+            const a = document.createElement('a');
+            a.href = x.url; a.target = '_blank'; a.textContent = x.name;
+            box.appendChild(a);
+          });
+          wait.appendChild(box);
+        }
+        b.disabled = false;
+      })
+      .withFailureHandler(function (err) {
+        wait.textContent = 'שגיאה: ' + err.message;
+        b.disabled = false;
+      })
+      .ask(text);
+  });
+</script>
+</body>
+</html>
