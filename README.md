@@ -1,10 +1,10 @@
-# Drive Search Bot (Convex + Firebase)
+# Drive Folder Search (Convex + Firebase)
 
-בוט חיפוש בדרייב: דף צ'אט שרץ על Convex, התחברות עם Google דרך Firebase, ו-Claude שעונה על בסיס הקבצים.
-קורא Google Docs, Sheets, Slides, PDF (עד 4MB) וקבצי טקסט. רק חשבון הבעלים יכול להשתמש בו.
+אתר חיפוש מהיר בתיקייה אחת בדרייב (כולל תתי-תיקיות), עם כפתור הורדה לכל קובץ שנמצא.
+התחברות עם Google דרך Firebase. רק חשבון הבעלים יכול להשתמש בו. בלי AI ובלי מפתחות בתשלום.
 
 ## הגדרה
-- **Firebase:** Authentication ← Google מופעל. Authentication ← Settings ← Authorized domains ← להוסיף את דומיין ה-`.convex.site`.
-- **Convex:** משתנה סביבה `ANTHROPIC_API_KEY`. אופציונלי: `ALLOWED_EMAIL` (ברירת מחדל: בעל הפרויקט).
+- **התיקייה:** `convex/settings.ts` (או משתנה סביבה `FOLDER_ID` ב-Convex).
+- **Firebase:** Authentication ← Google מופעל. Authorized domains כולל את דומיין ה-`.convex.site`.
 - **פריסה:** כל push ל-`main` נפרס אוטומטית (GitHub Actions, secret בשם `CONVEX_DEPLOY_KEY`).
-- בשאלה הראשונה הבוט יציג קישור להפעלת Drive API. לוחצים Enable פעם אחת.
+- בחיפוש הראשון האתר יציג קישור להפעלת Drive API. לוחצים Enable פעם אחת.
