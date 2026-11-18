@@ -1,34 +1,22 @@
 import { httpActionGeneric as httpAction, httpRouter } from "convex/server";
-import { refs } from "./google";
 import { PAGE } from "./page";
 
 const MODEL = "claude-sonnet-5-5";
-const SCOPE = "https://www.googleapis.com/auth/drive.readonly";
+const DEFAULT_ALLOWED_EMAIL = "ymalka82810@gmail.com";
 const MAX_FILES = 5;
 const MAX_TEXT = 6000;
 const MAX_PDF_BYTES = 4 * 1024 * 1024;
 
 const env = (name: string) => {
   const value = process.env[name];
-  if (!value) throw new Error(`חסר משתנה סביבה: ${name}`);
+  if (!value) throw new Error(`חסר משתנה סביבה ב-Convex: ${name}`);
   return value;
 };
-const redirectUri = () => `${env("CONVEX_SITE_URL")}/auth/callback`;
 const json = (data: unknown, status = 200) =>
   new Response(JSON.stringify(data), {
     status,
     headers: { "Content-Type": "application/json; charset=utf-8" },
   });
-const html = (body: string, status = 200) =>
-  new Response(body, { status, headers: { "Content-Type": "text/html; charset=utf-8" } });
-
-function passwordOk(given: string | null) {
-  const real = env("APP_PASSWORD");
-  if (!given || given.length !== real.length) return false;
-  let diff = 0;
-  for (let i = 0; i < real.length; i++) diff |= real.charCodeAt(i) ^ given.charCodeAt(i);
-  return diff === 0;
-}
 
 function toBase64(bytes: Uint8Array) {
   let s = "";
@@ -38,20 +26,15 @@ function toBase64(bytes: Uint8Array) {
   return btoa(s);
 }
 
-async function accessToken(refreshToken: string) {
-  const res = await fetch("https://oauth2.googleapis.com/token", {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({
-      client_id: env("GOOGLE_CLIENT_ID"),
-      client_secret: env("GOOGLE_CLIENT_SECRET"),
-      refresh_token: refreshToken,
-      grant_type: "refresh_token",
-    }),
-  });
-  const data = await res.json();
-  if (!data.access_token) throw new Error("החיבור לדרייב פג. התחבר מחדש ל-Google.");
-  return data.access_token as string;
+// בודק שהטוקן שייך לבעל הבוט ושיש לו הרשאת קריאה לדרייב
+async function checkToken(accessToken: string) {
+  const res = await fetch(
+    `https://www.googleapis.com/oauth2/v3/tokeninfo?access_token=${encodeURIComponent(accessToken)}`,
+  );
+  if (!res.ok) return false;
+  const info = (await res.json()) as { email?: string; scope?: string };
+  const allowed = (process.env.ALLOWED_EMAIL ?? DEFAULT_ALLOWED_EMAIL).toLowerCase();
+  return info.email?.toLowerCase() === allowed && String(info.scope).includes("drive.readonly");
 }
 
 async function claude(system: string, content: unknown, maxTokens: number) {
@@ -115,71 +98,25 @@ async function fileBlock(file: DriveFile, token: string): Promise<unknown | null
 const http = httpRouter();
 
 // דף האתר
-http.route({ path: "/", method: "GET", handler: httpAction(async () => html(PAGE)) });
-
-// התחברות ל-Google (פעם אחת)
 http.route({
-  path: "/auth/start",
+  path: "/",
   method: "GET",
-  handler: httpAction(async (ctx, req) => {
-    if (!passwordOk(new URL(req.url).searchParams.get("password"))) return html("סיסמה שגויה", 401);
-    const state = crypto.randomUUID();
-    await ctx.runMutation(refs.addState, { state });
-    const url = new URL("https://accounts.google.com/o/oauth2/v2/auth");
-    url.search = new URLSearchParams({
-      client_id: env("GOOGLE_CLIENT_ID"),
-      redirect_uri: redirectUri(),
-      response_type: "code",
-      scope: SCOPE,
-      access_type: "offline",
-      prompt: "consent",
-      state,
-    }).toString();
-    return Response.redirect(url.toString(), 302);
-  }),
-});
-
-http.route({
-  path: "/auth/callback",
-  method: "GET",
-  handler: httpAction(async (ctx, req) => {
-    const params = new URL(req.url).searchParams;
-    const state = params.get("state");
-    const code = params.get("code");
-    if (!state || !code || !(await ctx.runMutation(refs.consumeState, { state }))) {
-      return html("ההתחברות נכשלה. נסה שוב מהאתר.", 400);
-    }
-    const res = await fetch("https://oauth2.googleapis.com/token", {
-      method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: new URLSearchParams({
-        code,
-        client_id: env("GOOGLE_CLIENT_ID"),
-        client_secret: env("GOOGLE_CLIENT_SECRET"),
-        redirect_uri: redirectUri(),
-        grant_type: "authorization_code",
-      }),
-    });
-    const data = await res.json();
-    if (!data.refresh_token) return html("Google לא החזיר הרשאה. נסה שוב.", 400);
-    await ctx.runMutation(refs.saveToken, { refreshToken: data.refresh_token });
-    return html('<meta charset="utf-8"><p dir="rtl">הדרייב מחובר. <a href="/">חזרה לבוט</a></p>');
-  }),
+  handler: httpAction(async () =>
+    new Response(PAGE, { headers: { "Content-Type": "text/html; charset=utf-8" } }),
+  ),
 });
 
 // שאלה לבוט
 http.route({
   path: "/ask",
   method: "POST",
-  handler: httpAction(async (ctx, req) => {
+  handler: httpAction(async (_ctx, req) => {
     try {
-      const { password, question } = (await req.json()) as { password?: string; question?: string };
-      if (!passwordOk(password ?? null)) return json({ error: "סיסמה שגויה" }, 401);
+      const { accessToken, question } = (await req.json()) as { accessToken?: string; question?: string };
+      if (!accessToken || !(await checkToken(accessToken))) {
+        return json({ error: "צריך להתחבר מחדש עם Google", needsLogin: true }, 401);
+      }
       if (!question?.trim()) return json({ error: "אין שאלה" }, 400);
-
-      const refreshToken = await ctx.runQuery(refs.getToken, {});
-      if (!refreshToken) return json({ error: "הדרייב עוד לא מחובר", needsAuth: true }, 400);
-      const token = await accessToken(refreshToken);
 
       // 1. מילות חיפוש
       const kw = await claude(
@@ -204,12 +141,19 @@ http.route({
         includeItemsFromAllDrives: "true",
         supportsAllDrives: "true",
       }).toString();
-      const listRes = await fetch(listUrl, { headers: { Authorization: `Bearer ${token}` } });
+      const listRes = await fetch(listUrl, { headers: { Authorization: `Bearer ${accessToken}` } });
+      if (!listRes.ok) {
+        const text = await listRes.text();
+        if (listRes.status === 401) return json({ error: "צריך להתחבר מחדש עם Google", needsLogin: true }, 401);
+        const enableUrl = text.match(/https:\/\/console\.(?:developers|cloud)\.google\.com\/apis\/api\/drive\.googleapis\.com\/overview\?project=[\w-]+/)?.[0];
+        if (enableUrl) return json({ error: "צריך להפעיל את Drive פעם אחת", enableUrl }, 400);
+        return json({ error: `שגיאה מהדרייב: ${text.slice(0, 300)}` }, 500);
+      }
       const files = ((await listRes.json()).files ?? []) as DriveFile[];
       if (!files.length) return json({ answer: "לא נמצאו קבצים מתאימים.", files: [] });
 
       // 3. תשובה על בסיס הקבצים
-      const blocks = (await Promise.all(files.map((f) => fileBlock(f, token)))).filter(Boolean);
+      const blocks = (await Promise.all(files.map((f) => fileBlock(f, accessToken)))).filter(Boolean);
       const answer = await claude(
         "ענה בעברית, בקצרה, רק על סמך הקבצים שסופקו. ציין את שם הקובץ שממנו לקחת. אם התשובה לא בקבצים, אמור זאת.",
         [
